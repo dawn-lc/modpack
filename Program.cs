@@ -1,4 +1,5 @@
 ﻿using System.Security.Cryptography;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -210,7 +211,7 @@ namespace modpack
                     modpack!.Files.Clear();
                     foreach (var item in initialTree.GetAllFileInfos())
                     {
-                        modpack?.Files.Add(new OverrideFile() { Path = Path.GetRelativePath(overridesPath!.FullName, item.FullName), Hash = GetHash(item.FullName) });
+                        modpack?.Files.Add(new OverrideFile() { Path = Path.GetRelativePath(overridesPath!.FullName, item.FullName).Replace('\\','/'), Hash = GetHash(item.FullName) });
                     }
                     while (IsFileLocked(new FileInfo(Path.Join(modpackPath?.FullName, "server-manifest.json"))))
                     {
@@ -252,8 +253,10 @@ namespace modpack
         }
         private static void WriteModpackConfig()
         {
-            modpack!.Version = Guid.NewGuid().ToString();
-            File.WriteAllText(Path.Join(modpackPath?.FullName, "server-manifest.json"), JsonSerializer.Serialize(modpack, typeof(Modpack), SourceGenerationContext.Default));
+            int[] version = [.. modpack!.Version.Split(".").Select(i => Convert.ToInt32(i))];
+            version[^1] = version[^1] + 1;
+            modpack!.Version = string.Join(".", version);
+            File.WriteAllText(Path.Join(modpackPath?.FullName, "server-manifest.json"), JsonSerializer.Serialize(modpack, typeof(Modpack), new JsonSerializerOptions { TypeInfoResolver = SourceGenerationContext.Default, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
         }
         public static string GetHash(string fileName)
         {
