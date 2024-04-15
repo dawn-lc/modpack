@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "modpack": {
+      "commandName": "Project",
+      "commandLineArgs": "./test/"
+    }
+  }
+}
