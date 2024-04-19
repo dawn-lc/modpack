@@ -51,7 +51,6 @@ namespace modpack
         public required List<Addons> Addons { get; set; }
     }
 
-
     [JsonSourceGenerationOptions(WriteIndented = true)]
     [JsonSerializable(typeof(Modpack))]
     [JsonSerializable(typeof(OverrideFile))]
@@ -191,41 +190,79 @@ namespace modpack
     }
     internal class Program
     {
-        private static DirectoryInfo? modpackPath;
-        private static DirectoryInfo? overridesPath;
-        private static Modpack? modpack;
-        private static FileTree? initialTree;
         static void Main(string[] args)
         {
             try
             {
                 if (args.Length > 0 && Directory.Exists(args[0]))
                 {
-                    modpackPath = new(args[0]);
-                    overridesPath = new(Path.Join(modpackPath.FullName, "overrides"));
-                    modpack = JsonSerializer.Deserialize(File.ReadAllText(Path.Join(modpackPath.FullName, "server-manifest.json")), typeof(Modpack), new JsonSerializerOptions { TypeInfoResolver = SourceGenerationContext.Default }) as Modpack;
+                    DirectoryInfo modpackPath = new(args[0]);
+                    DirectoryInfo overridesPath = new(Path.Combine(modpackPath.FullName, "overrides"));
+                    FileInfo manifestPath = new(Path.Combine(modpackPath.FullName, "server-manifest.json"));
+                    FileInfo FileInfoCachePath = new(Path.Combine(modpackPath.FullName, "fileCache.json"));
+
+                    Modpack modpack = JsonSerializer.Deserialize(File.ReadAllText(manifestPath.FullName), typeof(Modpack), new JsonSerializerOptions { TypeInfoResolver = SourceGenerationContext.Default }) as Modpack ?? throw new Exception("Deserialize modpack Failed!");
 
                     Console.Out.WriteLine($"Creating modpack...");
-                   
-                    initialTree = new(overridesPath.FullName);
-                    modpack!.Files.Clear();
-                    foreach (var item in initialTree.GetAllFileInfos())
+
+                    Dictionary<string, OverrideFile> modpackFiles = [];
+
+                    Dictionary<string, FileInfo> modpackFileInfos = [];
+
+                    foreach (var file in modpack.Files)
                     {
-                        modpack?.Files.Add(new OverrideFile() { Path = Path.GetRelativePath(overridesPath!.FullName, item.FullName).Replace('\\','/'), Hash = GetHash(item.FullName) });
+                        modpackFiles.Add(file.Hash, file);
+                        modpackFileInfos.Add(file.Hash, new FileInfo(Path.Combine([overridesPath.FullName, .. file.Path.Split('/')])));
                     }
-                    while (IsFileLocked(new FileInfo(Path.Join(modpackPath?.FullName, "server-manifest.json"))))
+
+                    //处理在清单中存在的文件
+                    foreach (var file in modpackFileInfos.Where(item => item.Value.Exists))
                     {
-                        Console.Out.WriteLine($"{Path.Join(modpackPath?.FullName, "server-manifest.json")} is being used");
+                        string fileHash = GetFileHash(file.Value.FullName);
+                        if(fileHash != file.Key)
+                        {
+                            modpackFiles[file.Key].Hash = fileHash;
+                        }
+                    }
+                    //处理在清单中不存在的文件
+                    foreach (var file in modpackFileInfos.Where(item => !item.Value.Exists))
+                    {
+                        modpackFiles.Remove(file.Key);
+                        modpackFileInfos.Remove(file.Key);
+                    }
+
+                    FileTree fileTree = new(overridesPath.FullName);
+
+                    //处理在清单中不存在但实际目录中存在的文件
+                    var addFiles = fileTree.GetAllFileInfos().Where(file => !modpackFileInfos.ContainsValue(file));
+
+
+                    foreach (var file in addFiles)
+                    {
+                        string fileHash = GetFileHash(file.FullName);
+                        modpackFiles.Add(fileHash, new OverrideFile() { Path = Path.GetRelativePath(overridesPath!.FullName, file.FullName).Replace('\\', '/'), Hash = fileHash });
+                    }
+
+                    //将处理后的文件列表覆盖原本的清单
+                    modpack.Files = [.. modpackFiles.Values];
+
+                    //保存清单
+                    while (IsFileLocked(manifestPath))
+                    {
+                        Console.Out.WriteLine($"{manifestPath.Name} is being used");
                         Thread.Sleep(1000);
                     }
-                    WriteModpackConfig();
+                    int[] version = [..modpack.Version.Split(".").Select(i => Convert.ToInt32(i))];
+                    version[^1] = version[^1] + 1;
+                    modpack.Version = string.Join(".", version);
+                    File.WriteAllText(manifestPath.FullName, JsonSerializer.Serialize(modpack, typeof(Modpack), new JsonSerializerOptions { TypeInfoResolver = SourceGenerationContext.Default, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
+
                     Console.Out.WriteLine($"Create modpack completed.");
                     return;
                 }
             }
             catch (Exception ex)
             {
-                Console.Out.WriteLine($"Modpack not support.");
                 Console.Error.WriteLine(ex.ToString());
                 Console.Out.WriteLine("Press any key to exit.");
                 Console.ReadKey(true);
@@ -249,33 +286,28 @@ namespace modpack
             }
             return false;
         }
-        private static void WriteModpackConfig()
-        {
-            int[] version = [.. modpack!.Version.Split(".").Select(i => Convert.ToInt32(i))];
-            version[^1] = version[^1] + 1;
-            modpack!.Version = string.Join(".", version);
-            File.WriteAllText(Path.Join(modpackPath?.FullName, "server-manifest.json"), JsonSerializer.Serialize(modpack, typeof(Modpack), new JsonSerializerOptions { TypeInfoResolver = SourceGenerationContext.Default, Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }));
-        }
-        public static string GetHash(string fileName)
+
+        public static string GetFileHash(string path)
         {
             try
             {
-                using FileStream file = new(fileName, FileMode.Open);
+                using FileStream file = new(path, FileMode.Open);
                 using SHA1 sha1 = SHA1.Create();
                 return BitConverter.ToString(sha1.ComputeHash(file)).Replace("-", string.Empty).ToLower();
             }
             catch (IOException ex)
             {
-                throw new IOException($"Unable to open file {fileName}. {ex}");
+                throw new IOException($"Unable to open file {path}. {ex}");
             }
             catch (UnauthorizedAccessException ex)
             {
-                throw new UnauthorizedAccessException($"No permission to access file {fileName}. {ex}");
+                throw new UnauthorizedAccessException($"No permission to access file {path}. {ex}");
             }
             catch (Exception ex)
             {
-                throw new Exception($"Failed to get hash of file {fileName}. {ex}");
+                throw new Exception($"Failed to get hash of file {path}. {ex}");
             }
         }
+
     }
 }
