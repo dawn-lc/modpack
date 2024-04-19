@@ -205,7 +205,7 @@ namespace modpack
                     overridesPath = new(Path.Join(modpackPath.FullName, "overrides"));
                     modpack = JsonSerializer.Deserialize(File.ReadAllText(Path.Join(modpackPath.FullName, "server-manifest.json")), typeof(Modpack), new JsonSerializerOptions { TypeInfoResolver = SourceGenerationContext.Default }) as Modpack;
 
-                    Console.WriteLine($"Creating modpack...");
+                    Console.Out.WriteLine($"Creating modpack...");
                    
                     initialTree = new(overridesPath.FullName);
                     modpack!.Files.Clear();
@@ -215,21 +215,19 @@ namespace modpack
                     }
                     while (IsFileLocked(new FileInfo(Path.Join(modpackPath?.FullName, "server-manifest.json"))))
                     {
-                        Console.WriteLine($"{Path.Join(modpackPath?.FullName, "server-manifest.json")} is being used");
+                        Console.Out.WriteLine($"{Path.Join(modpackPath?.FullName, "server-manifest.json")} is being used");
                         Thread.Sleep(1000);
                     }
                     WriteModpackConfig();
-
-                    Console.WriteLine($"Create modpack completed.");
-
-
+                    Console.Out.WriteLine($"Create modpack completed.");
+                    return;
                 }
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"Modpack not support.");
-                Console.WriteLine(ex.ToString());
-                Console.WriteLine("Press any key to exit.");
+                Console.Out.WriteLine($"Modpack not support.");
+                Console.Error.WriteLine(ex.ToString());
+                Console.Out.WriteLine("Press any key to exit.");
                 Console.ReadKey(true);
             }
             
